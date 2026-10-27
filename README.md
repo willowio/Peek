@@ -1,3 +1,4 @@
+
 # Peek
 
 *take a look around.*
@@ -16,7 +17,27 @@ Mostly just looking around.
 
 ## installation
 
-Public installation instructions will be added with the first release.
+Requires macOS and Python 3.11 or newer.
+
+```sh
+(
+  set -e
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+
+  curl -fsSL \
+    https://github.com/willowio/Peek/releases/download/v0.1.0/peek-bootstrap.py \
+    -o "$tmp/peek-bootstrap.py"
+
+  printf '%s  %s\n' \
+    '22b700b5149d6af68703ebc83d02e2aafec0cad4e9a6ad4bb70cea1662044d0e' \
+    "$tmp/peek-bootstrap.py" | shasum -a 256 -c -
+
+  python3 "$tmp/peek-bootstrap.py" \
+    --url https://github.com/willowio/Peek/releases/download/v0.1.0/peek-0.1.0-install.zip \
+    --sha256 c367557e84ea128971916985f67a0e1faf94189d7f08d2f8c3c3e4c7171c489e
+)
+```
 
 Once installed, run:
 
