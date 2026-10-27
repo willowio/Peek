@@ -1,0 +1,25 @@
+k
+name: Bug report
+description: Found something broken in Peek?
+title: "[Bug] "
+body:
+  - type: textarea
+    id: issue
+    attributes:
+      label: What happened?
+      placeholder: Tell me what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can I reproduce it?
+      placeholder: What were you doing when it happened?
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: e.g. macOS 26
+

@@ -1,0 +1,22 @@
+# Generated and private local material; preserve these files on disk.
+__pycache__/
+*.py[cod]
+.venv*/
+venv/
+build/
+dist/
+*.egg-info/
+.DS_Store
+.checkpoints/
+/AUDIT.md
+/VALIDATION.md
+/FINAL_PASS.md
+/STABILIZATION.md
+/FINAL_CLEANUP.md
+/PRE_GITHUB.md
+/menu.txt
+/docs/REPOSITORY_REVIEW.md
+.env
+.env.*
+*.pem
+*.key
