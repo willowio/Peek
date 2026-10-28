@@ -35,7 +35,7 @@ File search is deliberately bounded, so it doesn't pretend to inventory your ent
 
 Requires macOS and Python 3.11 or newer.
 
-**Current published release: v0.1.0**
+**Current published release: v0.2.0**
 
 ```sh
 (
@@ -44,16 +44,16 @@ Requires macOS and Python 3.11 or newer.
   trap 'rm -rf "$tmp"' EXIT
 
   curl -fsSL \
-    https://github.com/willowio/Peek/releases/download/v0.1.0/peek-bootstrap.py \
+    https://github.com/willowio/Peek/releases/download/v0.2.0/peek-0.2.0-bootstrap.py \
     -o "$tmp/peek-bootstrap.py"
 
   printf '%s  %s\n' \
-    '22b700b5149d6af68703ebc83d02e2aafec0cad4e9a6ad4bb70cea1662044d0e' \
+    'fc1d7ddf52643a963b33144f35d79ae7b2c39a355217ca93944af8a8f3d67380' \
     "$tmp/peek-bootstrap.py" | shasum -a 256 -c -
 
   python3 "$tmp/peek-bootstrap.py" \
-    --url https://github.com/willowio/Peek/releases/download/v0.1.0/peek-0.1.0-install.zip \
-    --sha256 c367557e84ea128971916985f67a0e1faf94189d7f08d2f8c3c3e4c7171c489e
+    --url https://github.com/willowio/Peek/releases/download/v0.2.0/peek-0.2.0-install.zip \
+    --sha256 2bc7bbd5f65cf6245045cb61a2d4ba75785f17e8845b2a910ccb4e212db805e4
 )
 ```
 
@@ -77,9 +77,9 @@ Peek shows the verified installation targets and asks for confirmation before re
 
 It does not remove your personal files or change your shell configuration.
 
-## local v0.2.0 candidate
+## run from source
 
-Peek v0.2.0 is being prepared locally. The published installation command above still installs **v0.1.0** until the new release is approved.
+Peek v0.2.0 is now available on GitHub. You can also run it directly from a source checkout.
 
 To run v0.2.0 directly from a source checkout:
 
@@ -88,7 +88,7 @@ cd ~/Projects/Peekcli
 PYTHONPATH=src .venv/bin/python -m peekcli
 ```
 
-The v0.2.0 candidate includes six sections, native filename search without Spotlight, a compact one-screen Help reference, and display-only management instructions for the six Security controls.
+Peek v0.2.0 includes six sections, native filename search without Spotlight, a compact one-screen Help reference, and display-only management instructions for the six Security controls.
 
 Files supports inspection, Finder reveal, and copying, but never launches selected files.
 
