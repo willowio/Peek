@@ -6,7 +6,7 @@ import plistlib
 import tempfile
 import unittest
 from unittest.mock import patch
-from peekcli import launch,tui
+from peekcli import launch,tui,actions
 from peekcli.collectors import brew
 from peekcli.models import Result
 from peekcli.system import Command
@@ -51,7 +51,7 @@ class CaskInstallRecordTests(unittest.TestCase):
             with patch.object(launch,'run',return_value=Command()) as command:
                 self.assertEqual(launch.open_app(row,'brew').status,'ok')
             command.assert_called_once_with(['/usr/bin/open',str(app)],timeout=5)
-            state=tui.State();state.section=1;state.results['brew']=Result('brew','ok',{'casks':[row]})
+            state=tui.State();state.section=1;state.results['brew']=actions.prepare_result(Result('brew','ok',{'casks':[row]}))
             jobs=[];tui._handle(state,'o',lambda *args:jobs.append(args),None)
             self.assertEqual(jobs[0][0],'launch')
 

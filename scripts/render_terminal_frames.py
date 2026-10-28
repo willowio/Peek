@@ -10,7 +10,7 @@ source=Path(sys.argv[1]);output=Path(sys.argv[2]);output.mkdir(parents=True,exis
 frames=json.loads(source.read_text())
 font=ImageFont.truetype('/System/Library/Fonts/Menlo.ttc',15)
 cell_w,cell_h=10,22
-for key in ['apps','dev','settings','help','diagnostics','intro','detail']:
+for key in ['apps','brew','files','security','services','dev','help','diagnostics','intro','detail']:
  if key not in frames:continue
  frame=frames[key];image=Image.new('RGB',(frame['width']*cell_w+24,frame['height']*cell_h+24),RGB['background']);draw=ImageDraw.Draw(image)
  for span in frame['spans']:

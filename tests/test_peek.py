@@ -171,8 +171,8 @@ class ReportsAndCliTests(unittest.TestCase):
         self.assertIn('App 099',text)
         filtered=copy_report(result,'current',current=result.data[:2],selected=None)
         self.assertNotIn('App 099',filtered)
-        self.assertIn('Filtered scope: current',filtered)
-        self.assertIn('Selected item details',dict(copy_scopes(result)).values())
+        self.assertIn('Scope: Visible Results',filtered)
+        self.assertIn('Selected Item',dict(copy_scopes(result)).values())
 
     def test_search_matches_identifiers_and_unknown_scope(self):
         result=app_result(10)
@@ -202,10 +202,10 @@ class InterfaceTests(unittest.TestCase):
     def state(self):
         state=tui.State(); state.results['apps']=app_result(100); return state
 
-    def test_five_sections_only_and_number_navigation_collects_lazily(self):
+    def test_six_sections_and_number_navigation_collects_lazily(self):
         state=self.state(); tasks=[]
-        self.assertEqual(len(tui.MENU),5)
-        tui._handle(state,'3',lambda *x:tasks.append(x),None)
+        self.assertEqual(len(tui.MENU),6)
+        tui._handle(state,'4',lambda *x:tasks.append(x),None)
         self.assertEqual(state.key,'security')
         self.assertEqual(tasks[0][0],'security')
 

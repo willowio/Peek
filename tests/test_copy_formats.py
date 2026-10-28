@@ -4,12 +4,11 @@ from peekcli import tui
 from peekcli.models import Result
 from peekcli.views import copy_report
 from peekcli.screens import build_frame, context_keys
-from peekcli.settings import Preferences
 
 
 class CopyFormatTests(unittest.TestCase):
     def state(self, section, data):
-        state=tui.State(preferences=Preferences(language='en'))
+        state=tui.State()
         state.section=next(i for i,(_,key) in enumerate(tui.MENU) if key==section)
         state.results[section]=Result(section,'ok',data)
         return state
@@ -61,13 +60,9 @@ class CopyFormatTests(unittest.TestCase):
         tui._handle(state,'n',lambda *a:None,None);tui._handle(state,'v',lambda *a:None,None)
         self.assertEqual(state.view.query,'nv')
 
-    def test_copy_help_and_replay_keys(self):
+    def test_copy_help_and_back_keys(self):
         state=self.state('apps',[{'name':'Editor','version':'1'}]);tui._handle(state,'c',lambda *a:None,None)
-        frame=build_frame(state,100,30)
-        text=' '.join(span.text for span in frame.spans)
+        text=' '.join(span.text for span in build_frame(state,120,30).spans)
         self.assertIn('n Names',text);self.assertIn('v Names + versions',text)
-        tui._handle(state,'?',lambda *a:None,None)
-        self.assertEqual(state.overlay,'help')
-        with patch.object(tui,'animations_enabled',return_value=True):
-            tui._handle(state,'R',lambda *a:None,None)
-        self.assertEqual(state.effect.kind,'intro');self.assertEqual(state.overlay,'')
+        tui._handle(state,'?',lambda *a:None,None);self.assertEqual(state.overlay,'help')
+        tui._handle(state,'\x1b',lambda *a:None,None);self.assertEqual(state.overlay,'copy')

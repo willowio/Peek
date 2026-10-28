@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
-from peekcli import cli, installation, maintenance, settings, animation, tui
+from peekcli import cli, installation, maintenance, animation, tui
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -46,74 +46,49 @@ class LaunchContractTests(unittest.TestCase):
         with patch('peekcli.tui.can_launch',return_value=True),patch('peekcli.tui.run',side_effect=tui.curses.error('unavailable')):
             self.assertIn('could not open',self.invoke([])[2])
 
-    def test_exact_two_persisted_preferences_and_old_fields_ignored(self):
-        with tempfile.TemporaryDirectory() as temp,patch.dict(os.environ,{'PEEK_CONFIG':temp+'/settings.json'}):
-            p=settings.config_path();old={'theme':'contrast','motion':'off','density':'compact','language':'ru','intro':False}
-            p.write_text(json.dumps(old));before=p.read_bytes();prefs,error=settings.load()
-            self.assertFalse(error);self.assertEqual(asdict(prefs),{'language':'ru','intro':False});self.assertEqual(p.read_bytes(),before)
-            settings.save(prefs);self.assertEqual(json.loads(p.read_text()),asdict(prefs))
 
 
 class UninstallDecisionTests(unittest.TestCase):
-    def exercise(self,answers,*,error=None,animation_error=None,tty=True,env=None,verification_error=None):
+    def exercise(self,answers,*,error=None,tty=True,verification_error=None):
         class Terminal(io.StringIO):
             def isatty(self):return tty
-        out,err=Terminal(),io.StringIO()
-        plan={'prefix':'/verified/peek','launcher':'/verified/bin/peek'}
+        out,err=Terminal(),io.StringIO();plan={'prefix':'/verified/peek','launcher':'/verified/bin/peek'}
         with ExitStack() as stack:
-            stack.enter_context(patch.dict(os.environ,env or {'TERM':'xterm-256color'},clear=True))
             stack.enter_context(patch('sys.stdin.isatty',return_value=tty));stack.enter_context(patch('sys.stdout',out));stack.enter_context(patch('sys.stderr',err))
-            stack.enter_context(patch.object(maintenance,'load',return_value=(settings.Preferences(language='en'),'')))
             verify=stack.enter_context(patch.object(maintenance,'verify',return_value=plan,side_effect=verification_error))
-            remove=stack.enter_context(patch.object(maintenance,'remove',side_effect=error))
-            ask=stack.enter_context(patch('builtins.input',side_effect=answers))
-            effect=stack.enter_context(patch.object(maintenance,'animate_terminal',wraps=animation.animate_terminal,side_effect=animation_error))
-            stack.enter_context(patch.object(animation.time,'sleep'))
+            remove=stack.enter_context(patch.object(maintenance,'remove',side_effect=error));ask=stack.enter_context(patch('builtins.input',side_effect=answers))
             code=maintenance.uninstall()
-        return code,out.getvalue(),err.getvalue(),remove,ask,effect,verify
+        self.assertNotIn('\x1b',out.getvalue())
+        return code,out.getvalue(),err.getvalue(),remove,ask,verify
 
-    def test_y_rain_then_verified_removal(self):
-        code,out,err,remove,ask,effect,_=self.exercise(['Y'])
-        self.assertEqual(code,0);remove.assert_called_once();self.assertEqual(effect.call_args.args[0],'rain')
-        self.assertIn(animation._FRAMES['rain'][0],out);self.assertIn('Peek removed',out)
+    def test_confirmed_y_removes_verified_installation_without_animation(self):
+        code,out,err,remove,ask,_=self.exercise(['Y'])
+        self.assertEqual(code,0);remove.assert_called_once();self.assertIn('Peek removed',out)
+        self.assertFalse(hasattr(animation,'animate_terminal'))
 
-    def test_n_and_default_confetti_remove_nothing(self):
+    def test_n_and_default_cancel_without_removal(self):
         for answer in ['N','n','','  n  ']:
-            code,out,err,remove,ask,effect,_=self.exercise([answer])
-            self.assertEqual(code,0);remove.assert_not_called();self.assertEqual(effect.call_args.args[0],'confetti')
-            self.assertIn(animation._FRAMES['confetti'][0],out);self.assertIn('Nothing removed',out)
+            code,out,err,remove,ask,_=self.exercise([answer]);self.assertEqual(code,0)
+            remove.assert_not_called();self.assertIn('Nothing removed',out)
 
     def test_invalid_repeated_input_never_confirms(self):
-        code,out,err,remove,ask,effect,_=self.exercise(['yes','YY','maybe','N'])
+        code,out,err,remove,ask,_=self.exercise(['yes','YY','maybe','N'])
         self.assertEqual(code,0);self.assertEqual(ask.call_count,4);remove.assert_not_called()
-        code,out,err,remove,ask,effect,_=self.exercise(['nope','y'])
-        self.assertEqual(code,0);self.assertEqual(ask.call_count,2);remove.assert_called_once()
+        code,out,err,remove,ask,_=self.exercise(['invalid','y'])
+        self.assertEqual(code,0);remove.assert_called_once()
 
-    def test_eof_and_prompt_interrupt_cancel_without_effect_or_removal(self):
+    def test_eof_and_prompt_interrupt_cancel_safely(self):
         for interruption,expected in [(EOFError(),0),(KeyboardInterrupt(),130)]:
-            code,out,err,remove,ask,effect,_=self.exercise([interruption])
-            self.assertEqual(code,expected);remove.assert_not_called();effect.assert_not_called()
+            code,out,err,remove,ask,_=self.exercise([interruption]);self.assertEqual(code,expected);remove.assert_not_called()
 
-    def test_animation_interrupt_or_output_failure_cannot_obstruct_confirmed_action(self):
-        for error in [KeyboardInterrupt(),BrokenPipeError('closed')]:
-            code,out,err,remove,ask,effect,_=self.exercise(['Y'],animation_error=error)
-            self.assertEqual(code,0);remove.assert_called_once()
-            code,out,err,remove,ask,effect,_=self.exercise(['N'],animation_error=error)
-            self.assertEqual(code,0);remove.assert_not_called()
-
-    def test_disabled_animation_paths_and_removal_failures(self):
-        for variable in ['NO_COLOR','PEEK_NO_MOTION','PEEK_REDUCED_MOTION']:
-            for answer in ['Y','N']:
-                code,out,err,remove,ask,effect,_=self.exercise([answer],env={'TERM':'xterm-256color',variable:'1'})
-                self.assertEqual(code,0);self.assertNotIn(animation._FRAMES['rain'][0],out);self.assertNotIn(animation._FRAMES['confetti'][0],out)
-                self.assertEqual(remove.call_count,int(answer=='Y'))
-        code,out,err,remove,ask,effect,_=self.exercise(['Y'],error=PermissionError('denied'))
+    def test_removal_failure_never_prints_success(self):
+        code,out,err,remove,ask,_=self.exercise(['Y'],error=PermissionError('denied'))
         self.assertEqual(code,1);self.assertIn('denied',err);self.assertNotIn('Peek removed',out)
 
-    def test_non_tty_and_unsupported_installation_refuse_before_prompt(self):
-        code,out,err,remove,ask,effect,verify=self.exercise([],tty=False)
+    def test_non_tty_and_unverified_installations_refuse_before_prompt(self):
+        code,out,err,remove,ask,verify=self.exercise([],tty=False)
         self.assertEqual(code,1);verify.assert_not_called();ask.assert_not_called();remove.assert_not_called()
-        code,out,err,remove,ask,effect,_=self.exercise([],verification_error=ValueError('unsupported isolated installation'))
+        code,out,err,remove,ask,_=self.exercise([],verification_error=ValueError('unsupported'))
         self.assertEqual(code,1);self.assertIn('unsupported',err);ask.assert_not_called();remove.assert_not_called()
 
 
@@ -181,10 +156,11 @@ class ArtifactTests(unittest.TestCase):
     def test_installer_requires_checksum_and_exact_public_entrypoint(self):
         installer=script('install')
         with tempfile.TemporaryDirectory() as temp:
-            wheel=Path(temp)/'peekcli-0.1.0-py3-none-any.whl'
+            wheel=Path(temp)/'peekcli-0.2.0-py3-none-any.whl'
             with zipfile.ZipFile(wheel,'w') as archive:
-                archive.writestr('peekcli-0.1.0.dist-info/METADATA','Name: peekcli\nVersion: 0.1.0\n')
-                archive.writestr('peekcli-0.1.0.dist-info/entry_points.txt','[console_scripts]\npeek = peekcli.cli:main\n')
+                archive.writestr('peekcli/__init__.py',"__version__ = '0.2.0'\n")
+                archive.writestr('peekcli-0.2.0.dist-info/METADATA','Name: peekcli\nVersion: 0.2.0\n')
+                archive.writestr('peekcli-0.2.0.dist-info/entry_points.txt','[console_scripts]\npeek = peekcli.cli:main\n')
             installer.validate_wheel(wheel,hashlib.sha256(wheel.read_bytes()).hexdigest())
             with self.assertRaises(ValueError):installer.validate_wheel(wheel,'0'*64)
             with zipfile.ZipFile(wheel,'a') as archive:archive.writestr('other.dist-info/entry_points.txt','[console_scripts]\npeekcli = peekcli.cli:main\n')

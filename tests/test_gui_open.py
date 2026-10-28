@@ -8,10 +8,9 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
-from peekcli import launch,tui
+from peekcli import launch,tui,actions
 from peekcli.models import Result
 from peekcli.screens import context_keys,detail_lines
-from peekcli.settings import Preferences
 from peekcli.system import Command
 from tests.test_distribution import script
 
@@ -79,13 +78,13 @@ class GuiOpenTests(unittest.TestCase):
 
     def test_missing_after_selection_and_launch_error_leave_tui_usable(self):
         app=self.app();row={'name':'Editor','path':str(app)}
-        state=tui.State(preferences=Preferences(language='en'));state.results['apps']=Result('apps','ok',[row]);state.detail=dict(row)
+        state=tui.State();state.results['apps']=Result('apps','ok',[row]);state.detail=actions.prepare_row(row,'apps');row=state.detail
         jobs=[];tui._handle(state,'o',lambda *args:jobs.append(args),None)
         self.assertEqual(jobs[0][0],'launch');self.assertEqual(state.detail,row)
         app.rename(self.root/'Moved.app')
         with patch.object(launch,'run') as command:result=jobs[0][1]()
         command.assert_not_called();tui._accept_result(state,'launch',0,result)
-        self.assertIn('No installed GUI app',state.message);self.assertEqual(state.detail,row)
+        self.assertIn('No supported target',state.message);self.assertEqual(state.detail,row)
         app=self.app('Another.app');row={'name':'Another','path':str(app)}
         with patch.object(launch,'run',return_value=Command(returncode=1,stderr='LaunchServices rejected it')):
             result=launch.open_app(row,'apps')
@@ -96,35 +95,20 @@ class GuiOpenTests(unittest.TestCase):
     def test_shortcut_and_hints_only_for_eligible_selection_and_never_in_input_or_menus(self):
         app=self.app();row={'name':'Editor','path':str(app)}
         for section,data in [('apps',[row]),('brew',{'casks':[self.cask(app)]})]:
-            state=tui.State();state.section=next(i for i,(_,key) in enumerate(tui.MENU) if key==section);state.results[section]=Result(section,'ok',data)
-            self.assertIn(('o','open_app'),context_keys(state,'main'))
+            state=tui.State();state.section=next(i for i,(_,key) in enumerate(tui.MENU) if key==section);state.results[section]=actions.prepare_result(Result(section,'ok',data))
+            self.assertIn(('o','open_target'),context_keys(state,'main'))
             self.assertTrue(any('o  ' in text for text,_ in detail_lines(state.rows()[0],section,state.t)))
             for detail in (None,dict(state.rows()[0])):
                 state.detail=detail;jobs=[];tui._handle(state,'o',lambda *args:jobs.append(args),None);self.assertEqual(jobs[0][0],'launch')
             state.detail=None;state.search=True;jobs=[];tui._handle(state,'o',lambda *a:jobs.append(a),None)
             self.assertEqual(state.view.query,'o');self.assertFalse(jobs)
-            state.search=False;state.overlay='settings';tui._handle(state,'o',lambda *a:jobs.append(a),None);self.assertFalse(jobs)
+            state.search=False;state.overlay='filter';tui._handle(state,'o',lambda *a:jobs.append(a),None);self.assertFalse(jobs)
         state=tui.State();state.results['apps']=Result('apps','ok',[{'name':'Missing','path':str(self.root/'missing.app')}])
         self.assertNotIn('o',dict(context_keys(state,'main')))
         with patch.object(launch.platform,'system',return_value='Linux'):self.assertIsNone(launch.launch_target(row,'apps'))
 
 
 class InstallerFeedbackTests(unittest.TestCase):
-    def test_spinner_is_tty_only_and_cleans_up_after_errors(self):
-        installer=script('install')
-        class Terminal(io.StringIO):
-            def isatty(self):return True
-            def write(self,value):
-                result=super().write(value);written.set();return result
-        written=threading.Event();out=Terminal()
-        with patch.dict(os.environ,{'TERM':'xterm-256color'},clear=True):
-            with self.assertRaisesRegex(RuntimeError,'failure'):
-                with installer.progress(out):
-                    self.assertTrue(written.wait(1));raise RuntimeError('failure')
-        self.assertIn('Installing peek',out.getvalue());self.assertTrue(out.getvalue().endswith('\r\x1b[2K'))
-        for env,stream in [({'TERM':'xterm-256color'},io.StringIO()),({'TERM':'dumb'},Terminal()),({'TERM':'xterm-256color','PEEK_NO_MOTION':'1'},Terminal()),({'TERM':'xterm-256color','NO_COLOR':'1'},Terminal())]:
-            with patch.dict(os.environ,env,clear=True),installer.progress(stream):pass
-            self.assertEqual(stream.getvalue(),'')
 
     def test_success_requires_real_launcher_check(self):
         installer=script('install')

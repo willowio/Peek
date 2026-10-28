@@ -6,7 +6,7 @@ from peekcli.models import Result
 from peekcli.system import Command
 from peekcli.screens import group_options,detail_lines
 from peekcli.views import copy_scopes
-from peekcli.i18n import LANGUAGES,tr
+from peekcli.strings import text as tr
 
 
 class SecurityFilterCleanupTests(unittest.TestCase):
@@ -20,11 +20,10 @@ class SecurityFilterCleanupTests(unittest.TestCase):
                 self.assertNotIn('dependency',dict(group_options(state)))
                 self.assertNotIn('dependency',dict(copy_scopes(state.results[section])))
                 self.assertNotIn('requested',dict(group_options(state)))
-        for language in LANGUAGES:self.assertEqual(tr('Unknown',language),tr('Unavailable',language))
 
     def test_dependency_placeholders_removed_but_evidence_preserved(self):
         row={'name':'tool','kind':'formula','dependencies':[],'dependencies_collected':False,'requested':None}
-        lines='\n'.join(line for line,_ in detail_lines(row,'brew',lambda key:tr(key,'en')))
+        lines='\n'.join(line for line,_ in detail_lines(row,'brew',tr))
         self.assertNotIn('Dependencies',lines);self.assertNotIn('not recorded',lines);self.assertNotIn('Not collected',lines)
         self.assertIn('dependencies_collected',row)
 

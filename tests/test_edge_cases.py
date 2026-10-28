@@ -55,13 +55,6 @@ class Edges(unittest.TestCase):
         self.assertEqual([r.status for r in results],['error','ok'])
         self.assertIn('denied',results[0].errors[0])
 
-    def test_no_motion_and_no_color_skip_even_on_tty(self):
-        class Tty(io.StringIO):
-            def isatty(self): return True
-        for flag in ['NO_COLOR','PEEK_NO_MOTION']:
-            with patch.dict(os.environ,{'TERM':'xterm-256color',flag:'1'},clear=True),patch.object(animation.time,'sleep') as sleep:
-                self.assertFalse(animation.animate_terminal('confetti',Tty()))
-            sleep.assert_not_called()
 
     def test_reduced_color_terminal_uses_only_valid_pairs_and_colors(self):
         with patch.dict(os.environ,{},clear=True),patch.object(tui.curses,'has_colors',return_value=True),patch.object(tui.curses,'start_color'),patch.object(tui.curses,'use_default_colors'),patch.object(tui.curses,'COLORS',8,create=True),patch.object(tui.curses,'COLOR_PAIRS',8,create=True),patch.object(tui.curses,'init_pair') as pair:

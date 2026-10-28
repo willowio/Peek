@@ -1,8 +1,8 @@
-from . import apps, brew, security, services, dev
+from . import apps, brew, security, services, dev, files
 from ..models import Result
 import time
 
-COLLECTORS = {"apps": apps.collect, "brew": brew.collect, "security": security.collect, "services": services.collect, "dev": dev.collect}
+COLLECTORS = {"apps": apps.collect, "brew": brew.collect, "files": files.idle, "security": security.collect, "services": services.collect, "dev": dev.collect}
 
 
 def collect_all():

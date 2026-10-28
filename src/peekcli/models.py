@@ -25,6 +25,7 @@ class Result:
     errors: list[str] = field(default_factory=list)
 
     duration_ms: float | None = None
+    context: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

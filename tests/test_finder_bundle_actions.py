@@ -9,7 +9,7 @@ class FinderBundleActionTests(unittest.TestCase):
     def test_finder_lowercase_and_uppercase_dispatch_native_action_from_details(self):
         for key in ['f','F']:
             state=tui.State();state.detail={'name':'Example','path':'/Applications/Example.app'};jobs=[]
-            with patch.object(tui,'_reveal',return_value=Result('finder','ok',{})) as reveal:
+            with patch.object(tui.actions,'reveal',return_value=Result('finder','ok',{})) as reveal:
                 tui._handle(state,key,lambda *args:jobs.append(args),None)
                 self.assertEqual(jobs[0][0],'finder');jobs[0][1]()
                 reveal.assert_called_once_with('/Applications/Example.app')

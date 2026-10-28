@@ -35,10 +35,16 @@ def check(name: str, args: list[str], positive: tuple[str, ...], negative: tuple
         row['error'] = f'{args[0]} not found'
         return row
     command = run([utility, *args[1:]], timeout=8)
+    row['returncode']=command.returncode
     output = (command.stdout + '\n' + command.stderr).strip()
     row['evidence'] = output or None
     if command.error:
         row.update(state='Error', error=command.error)
+    elif name=='FileVault' and command.returncode==1 and state_from_text(output,positive,negative)=='Disabled':
+        # fdesetup(8): status 1 means Off; this is not a failed query.
+        row['state']='Disabled'
+    elif name=='FileVault' and command.returncode==2 and state_from_text(output,positive,negative)=='Enabled':
+        row['state']='Enabled';row['busy']=True
     elif command.returncode:
         row.update(state='Error', error=f'{args[0]} exited {command.returncode}; state not inferred from failed execution')
     else:
@@ -59,6 +65,20 @@ def collect() -> Result:
     if platform.system() != 'Darwin':
         return Result('security', 'unavailable', [{'name': name, 'state': 'Unsupported', 'source': ' '.join(args), 'explanation': EXPLANATIONS[name][0]} for name, args, _, _ in specs], source='macOS native security utilities', limitations=['These controls require macOS.'])
     checks = [check(*spec) for spec in specs]
+    management={'SIP':'Managed from macOS Recovery; Peek makes no changes.',
+                'FileVault':'System Settings → Privacy & Security → FileVault',
+                'Gatekeeper':'System Settings → Privacy & Security',
+                'Firewall':'System Settings → Network → Firewall',
+                'Firewall Stealth':'System Settings → Network → Firewall → Options',
+                'Firewall Block All':'System Settings → Network → Firewall → Options'}
+    firewall=next(row['state'] for row in checks if row['name']=='Firewall')
+    for row in checks:
+        row['manage']=management[row['name']]
+        if row.get('busy'):row['interpretation']='FileVault reports On but busy. Completion and unlocked-session protection are not established.'
+        if row['name'] in {'Firewall Stealth','Firewall Block All'}:
+            row['firewall_state']=firewall
+            if firewall=='Disabled':row['interpretation']=f"Configured {row['state'].lower()}, but this policy is inactive while the application firewall is disabled."
+            elif firewall!='Enabled':row['interpretation']='Policy effectiveness cannot be established because the main firewall state is unavailable.'
     errors = [f"{x['name']}: {x['error']}" for x in checks if x.get('error')]
     return Result('security', 'partial' if errors else 'ok', checks, source='csrutil, fdesetup, spctl, socketfilterfw', errors=errors,
                   limitations=['Selected observed controls, not a security score, malware scan or complete security audit.'])

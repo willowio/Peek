@@ -2,9 +2,10 @@
 import unicodedata
 
 
-def safe(value) -> str:
-    return "".join(ch if ch in "\n\t" or not unicodedata.category(ch).startswith("C") else "?"
-                   for ch in str(value)).replace("\t", "    ")
+def safe(value, *, tabs=False) -> str:
+    clean = "".join(ch if ch in "\n\t" or not unicodedata.category(ch).startswith("C") else "?"
+                   for ch in str(value))
+    return clean if tabs else clean.replace("\t", "    ")
 
 
 def cell_width(value: str) -> int:

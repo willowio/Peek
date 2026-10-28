@@ -6,7 +6,7 @@ import platform
 from ..models import Result
 from ..system import find_executable, run
 
-TOOLS=('git','swift','clang','python3','python3.14','python3.15','node','npm','pnpm','yarn','ruby','gem','go','rustc','cargo','java','dotnet','brew','pipx','uv','docker')
+TOOLS=('git','swift','clang','python3','python3.14','python3.15','node','npm','pnpm','yarn','ruby','gem','go','rustc','cargo','java','dotnet','brew','pipx','uv','pyenv','fnm','docker')
 
 
 def collect() -> Result:
@@ -31,6 +31,8 @@ def collect() -> Result:
         path=find_executable(name)
         rows.append({'name':name,'path':path,'group':'runtime','state':'Available' if path else 'Not found',
                      'source':'PATH resolution only; binary not executed'})
+    for name,path in [('nvm data directory',Path.home()/'.nvm'),('pyenv data directory',Path.home()/'.pyenv')]:
+        if path.is_dir():rows.append({'name':name,'path':str(path),'group':'runtime','state':'Available','source':'Known manager data directory; scripts are not executed.'})
     seen=set()
     for index,raw in enumerate(os.environ.get('PATH','').split(os.pathsep)):
         directory=Path(raw or '.').expanduser()

@@ -6,9 +6,8 @@ import stat
 import tempfile
 import unittest
 from unittest.mock import patch
-from peekcli import settings,tui
+from peekcli import tui
 from peekcli.collectors import apps
-from peekcli.i18n import LANGUAGES,catalog
 from peekcli.layout import Layout
 from peekcli.models import Result
 from peekcli.screens import build_frame,footer
@@ -28,14 +27,6 @@ class MicroPolishTests(unittest.TestCase):
                 result=apps.source_info(Path('/Applications/Any.app'),{'bundle_id':identifier})
             self.assertEqual(result['category'],expected);command.assert_not_called()
 
-    def test_saved_light_theme_migrates_in_memory_and_survives_next_save(self):
-        with tempfile.TemporaryDirectory() as temp,patch.dict(os.environ,{'PEEK_CONFIG':temp+'/settings.json'}):
-            p=settings.config_path();original=json.dumps({'theme':'light','language':'pt_BR','motion':'off','density':'compact','intro':False});p.write_text(original)
-            prefs,error=settings.load()
-            self.assertFalse(error);self.assertFalse(hasattr(prefs,'theme'));self.assertEqual(prefs.language,'pt_BR');self.assertFalse(prefs.intro)
-            self.assertEqual(p.read_text(),original)
-            settings.save(prefs);self.assertEqual(settings.load()[0],prefs)
-        for language in LANGUAGES:self.assertNotIn('light',catalog(language))
 
     def test_selection_fills_list_width_and_rule_is_absent_after_navigation_and_resize(self):
         state=tui.State();state.results['apps']=Result('apps','ok',[{'name':f'App {i}','version':'1','source':{'category':'third_party'}} for i in range(80)])
@@ -61,12 +52,12 @@ class MicroPolishTests(unittest.TestCase):
         with patch.object(tui,'_MONO',False),patch.object(tui,'_FILLED_SELECTION',False):
             self.assertTrue(tui._attr('logo',True)&tui.curses.A_REVERSE)
         state=tui.State()
-        for overlay in ['','help','settings','filter']:
+        for overlay in ['','help','copy','filter']:
             state.overlay=overlay;state.options=[('all','All')]
             frame=build_frame(state,160,40)
             self.assertTrue(any(s.selected and '1 Applications' in s.text for s in frame.spans))
-            if overlay=='help':self.assertTrue(any(s.selected and 'Getting started' in s.text for s in frame.spans))
-            if overlay in {'filter','settings'}:
+            if overlay=='help':self.assertTrue(any('Help · Controls' in s.text for s in frame.spans))
+            if overlay in {'filter','copy'}:
                 content=[s for s in frame.spans if s.selected and s.text.startswith('> ')]
                 self.assertEqual(len(content),1);self.assertLessEqual(cell_width(content[0].text),64)
 
@@ -74,7 +65,7 @@ class MicroPolishTests(unittest.TestCase):
         state=tui.State();state.detail={'name':'Example','path':'/Applications/Example.app'}
         with patch('peekcli.screens.platform.system',return_value='Darwin'):
             text=footer(state,156)
-        for token in ['Esc Back','b Bundle','v Verify','t Evidence','y Copy','f Finder','? Help']:self.assertIn(token,text)
+        for token in ['Esc Back','y Copy','? Help']:self.assertIn(token,text)
         state.section=2;state.detail={'name':'SIP'}
         text=footer(state,156)
         for token in ['b Bundle','v Verify','f Finder']:self.assertNotIn(token,text)

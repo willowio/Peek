@@ -18,7 +18,7 @@ DISCOVERY_DEPTH = 8
 
 def app_roots(home: Path | None = None) -> list[Path]:
     home = home or Path.home()
-    return [Path("/Applications"), Path("/System/Applications"), home / "Applications"]
+    return [Path("/Applications"), Path("/System/Applications"), home / "Applications", Path("/System/Library/CoreServices")]
 
 
 def ownership_from_bundle_id(bundle_id: Any) -> str:
@@ -96,6 +96,11 @@ def distribution_sources() -> dict[str, str]:
                 for package in islice(packages,512):
                     if time.monotonic()-started>.15:return sources
                     if package.name.startswith('.') or not package.is_dir(follow_symlinks=False):continue
+                    from .brew import installed_applications
+                    _,installed=installed_applications(Path(package.path))
+                    for app in installed:
+                        if len(sources)>=512:return sources
+                        sources[app['path']]='Homebrew installation record: '+app['evidence']
                     with os.scandir(package.path) as versions:
                         for version in islice(versions,32):
                             if time.monotonic()-started>.15:return sources
@@ -217,6 +222,14 @@ def collect(home: Path | None = None, roots: list[Path] | None = None) -> Result
             if dirs and (len(Path(current).relative_to(root).parts)>=DISCOVERY_DEPTH or len(seen)>=10000):
                 dirs[:]=[]
                 errors.append(f'Traversal limit reached at {current}')
+    # Recorded custom cask destinations are inspected directly, never recursively crawled.
+    if roots is None:
+        for location,evidence in list(distributions.items())[:512]:
+            if location in seen:continue
+            candidate=parse_app(Path(location))
+            if candidate:
+                candidate['source']=source_info(Path(location),candidate,evidence)
+                rows.append(candidate);seen.add(location)
     # Keep one inventory row per application identity. Copies in different
     # standard locations remain available for display when they distinguish
     # otherwise identical installations.
@@ -236,7 +249,7 @@ def collect(home: Path | None = None, roots: list[Path] | None = None) -> Result
     inventory = sorted(grouped.values(), key=lambda row: (str(row["name"]).casefold(), row["path"].casefold()))
     return Result("apps", status_from(errors, inventory), inventory, source="Info.plist in application bundles", errors=errors,
                   limitations=[f"Discovered {len(rows)} bundle candidates; {len(inventory)} application identities. Search depth is limited to {DISCOVERY_DEPTH} directories; 5000 directories per root and 10000 app candidates maximum.",
-                               "Search covers standard system and user Applications locations; other volumes and embedded helper apps are not scanned automatically.",
+                               "Search covers standard Applications, bounded CoreServices, and recorded cask app destinations; other volumes and embedded helper apps are not crawled.",
                                "Source attribution uses protected system provenance, local distribution or declared bundle evidence; full signatures are checked only on request."])
 
 

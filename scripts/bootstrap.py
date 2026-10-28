@@ -2,6 +2,7 @@
 """Future bootstrap: install a published Peek bundle only with its trusted SHA-256."""
 from __future__ import annotations
 import argparse
+import re
 import hashlib
 import io
 from pathlib import Path
@@ -29,15 +30,16 @@ class SecureRedirect(HTTPRedirectHandler):
 
 
 def install_bundle(payload,checksum,extra=()):
-    if len(checksum)!=64 or hashlib.sha256(payload).hexdigest()!=checksum.lower():
+    if len(payload)>LIMIT or len(checksum)!=64 or hashlib.sha256(payload).hexdigest()!=checksum.lower():
         raise ValueError('Bundle checksum mismatch. Nothing installed.')
     with zipfile.ZipFile(io.BytesIO(payload)) as archive,tempfile.TemporaryDirectory(prefix='peek-bootstrap-') as temp:
-        expected={'install.py','peekcli-0.1.0-py3-none-any.whl'}
-        if set(archive.namelist())!=expected or len(archive.namelist())!=2 or sum(i.file_size for i in archive.infolist())>LIMIT:
+        names=archive.namelist()
+        wheels=[name for name in names if re.fullmatch(r'peekcli-\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?-py3-none-any\.whl',name)]
+        if len(wheels)!=1 or set(names)!={'install.py',wheels[0]} or len(names)!=2 or sum(i.file_size for i in archive.infolist())>LIMIT:
             raise ValueError('Unexpected bundle contents.')
         folder=Path(temp)
-        for name in sorted(expected):(folder/name).write_bytes(archive.read(name))
-        wheel=folder/'peekcli-0.1.0-py3-none-any.whl'
+        for name in names:(folder/name).write_bytes(archive.read(name))
+        wheel=folder/wheels[0]
         return subprocess.call([sys.executable,str(folder/'install.py'),'--wheel',str(wheel),'--sha256',hashlib.sha256(wheel.read_bytes()).hexdigest(),*extra])
 
 

@@ -1,11 +1,10 @@
 """Keyboard-first curses adapter; collectors and animations never block input."""
 from __future__ import annotations
 import curses
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 import locale
 import os
 from pathlib import Path
-import platform
 import queue
 import subprocess
 import sys
@@ -15,18 +14,18 @@ import time
 from .animation import Timeline, animations_enabled
 from .colors import PALETTE, SELECTION_COLORS
 from .collectors import COLLECTORS
+from .collectors import files as file_search
+from . import actions
+from .security_commands import CATALOG
 from .collectors.apps import inspect_bundle
 from .collectors.services import inspect_service
-from .i18n import tr, LANGUAGES
+from .strings import text as tr
 from .models import Result
-from .launch import launch_target, open_app
 from .output import item_report
-from .settings import Preferences, CHOICES, load, save
-from .system import find_executable, run as run_command
+from .system import find_executable
 from .text import clip, safe
-from .views import LABELS, select, copy_report
-from .screens import build_frame, settings_options, group_options
-from .keymap import HELP_TOPICS
+from .views import LABELS, select, copy_report, sort_options
+from .screens import build_frame, group_options
 
 MENU=tuple((LABELS[key],key) for key in COLLECTORS)
 PAIRS={name:i for i,name in enumerate(('text','muted','logo','cyan','mint','yellow','red','border','selection'),1)}
@@ -81,22 +80,13 @@ def _copy(text):
     pbcopy=find_executable('pbcopy')
     if not pbcopy:return 'Clipboard unavailable: pbcopy not found. Try copying again.'
     try:
-        subprocess.run([pbcopy],input=safe(text),text=True,encoding='utf-8',timeout=3,check=True,
+        subprocess.run([pbcopy],input=safe(text,tabs=True),text=True,encoding='utf-8',timeout=3,check=True,
                        stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
     except (OSError,subprocess.SubprocessError) as exc:return f'Clipboard failed: {safe(exc)}. The displayed information is still available.'
     return 'Copied to clipboard.'
 
 
-def _reveal(path):
-    if platform.system()!='Darwin':
-        return Result('finder','unavailable',{},errors=['Finder requires macOS.'])
-    target=Path(path).expanduser().absolute()
-    if not target.exists() and not target.is_symlink():
-        return Result('finder','error',{},errors=['The selected path is no longer accessible.'])
-    result=run_command(['/usr/bin/open','-R',str(target)],timeout=3)
-    return Result('finder','error' if result.error or result.returncode else 'ok',{},
-                  errors=[result.error or result.stderr.strip()] if result.error or result.returncode else [])
-
+def _reveal(path):return actions.reveal(path)
 
 @dataclass
 class View:
@@ -122,12 +112,17 @@ class State:
     search:bool=False
     original_query:str=''
     detail_token:int=0
-    preferences:Preferences=field(default_factory=Preferences)
-    settings_error:str=''
     overlay_stack:list=field(default_factory=list)
-    help_topic:int=0
     effect:Timeline|None=None
     last_error:str=''
+    intro_static:bool=False
+    files_generation:int=0
+    files_scope:str|None=None
+    files_refresh:bool=False
+    files_selection:tuple|None=None
+    confirmation:object=None
+    _row_cache:dict=field(default_factory=dict,repr=False)
+    revision:int=0
     clock:object=field(default=time.monotonic,repr=False)
 
     @property
@@ -140,10 +135,20 @@ class State:
     def ascii(self):return os.environ.get('PEEK_ASCII')=='1' or (locale.getpreferredencoding(False) or '').lower() in {'ascii','us-ascii'}
     @property
     def animations_enabled(self):return not _MONO and animations_enabled()
-    def t(self,key,**values):return tr(key,self.preferences.language,**values)
+    def t(self,key,**values):return tr(key,**values)
+    def invalidate(self):self.revision+=1;self._row_cache.clear()
     def rows(self):
+        if self.key=='files' and self.view.group=='applications':
+            self.view.group='all';self.view.selected=self.view.scroll=0
         result=self.results.get(self.key)
-        return select(result,group=self.view.group,query=self.view.query,sort=self.view.sort) if result else []
+        if not result:return []
+        cache=(self.key,id(result),self.revision,self.view.group,self.view.query,self.view.sort)
+        if cache not in self._row_cache:
+            self._row_cache={cache:select(result,group=self.view.group,query='' if self.key=='files' else self.view.query,sort=self.view.sort)}
+        return self._row_cache[cache]
+    def selected_row(self):
+        rows=self.rows()
+        return self.detail if self.detail is not None else rows[min(max(0,self.view.selected),len(rows)-1)] if rows else None
     def animate(self,kind):self.effect=Timeline(kind) if self.animations_enabled else None
     def copy(self,text):
         outcome=_copy(text)
@@ -206,17 +211,16 @@ def _switch_section(state,index,schedule):
     state.section=index
     state.overlay='';state.overlay_stack=[];state.options=[];state.option=0
     state.detail=None;state.detail_token+=1;state.detail_scroll=0
-    if state.key not in state.results and state.key not in state.busy:schedule(state.key,COLLECTORS[state.key])
+    if state.key=='files':state.results.setdefault('files',file_search.idle())
+    elif state.key not in state.results and state.key not in state.busy:schedule(state.key,COLLECTORS[state.key])
     state.animate('section')
 
 
 def _copy_options(state):
-    rows=state.rows()
-    selected=state.detail or (rows[min(state.view.selected,len(rows)-1)] if rows else None)
-    options=[('all',state.t('copy_all'))]+group_options(state)[1:]+[('current',state.t('copy_current'))]
-    if selected:options.append(('selected',state.t('copy_details')))
-    if selected and selected.get('path'):options.append(('path',state.t('copy_path')))
-    return options
+    row=state.selected_row();options=[]
+    if row:options.append(('selected','Selected Item'))
+    if actions.paths_for(row,state.key):options.append(('path','Selected Path'))
+    return options+[('current','Visible Results'),('all','Entire Section')]
 
 
 def _inspect_path(state,schedule,screen):
@@ -227,92 +231,134 @@ def _inspect_path(state,schedule,screen):
         state.animate('detail')
 
 
+def _files_changed(state,*,refresh=False):
+    previous=state.results.get('files')
+    same_search=previous and previous.context.get('query')==state.view.query and previous.context.get('scope')==file_search.scope_label(state.files_scope)
+    if refresh and same_search:
+        row=state.selected_row()
+        if row and row.get('path'):state.files_selection=(row['path'],state.view.selected)
+    else:state.files_selection=None
+    state.files_generation+=1
+    state.files_refresh=state.files_refresh or refresh
+    searching=bool(state.view.query.strip())
+    state.results['files']=file_search.result('searching' if searching else 'idle',query=state.view.query,scope=state.files_scope)
+    if searching:state.busy.add('files')
+    else:state.busy.discard('files')
+    state.invalidate()
+
+
+def _path_action(state,mode,schedule):
+    row=state.selected_row();paths=actions.paths_for(row,state.key)
+    if mode=='reveal':paths=(row or {}).get('_actions',{}).get('paths',paths)
+    if not paths:state.message='No associated path is available.';return
+    if len(paths)>1:_open(state,'paths:'+mode,[(path,label+' · '+path) for label,path in paths]);return
+    if mode=='copy':state.copy(paths[0][1])
+    else:schedule('finder',lambda:actions.reveal(paths[0][1]))
+
+
+def _open_target(state,schedule):
+    if state.key=='files':return
+    row=state.selected_row()
+    opening=(row or {}).get('_actions',{}).get('open')
+    if not opening:state.message='No supported open action. Refresh if the path changed.';return
+    snapshot,section=dict(row),state.key
+    if opening[0]=='disk_image':
+        identity=row.get('_actions',{}).get('identity')
+        if identity is None:state.message='Disk image is no longer accessible.';return
+        state.confirmation=(snapshot,section,identity)
+        _open(state,'confirm',[('no','Cancel'),('yes','Open disk image')]);return
+    schedule('launch',lambda:actions.open_target(snapshot,section))
+
+
 def _handle(state,key,schedule,screen):
-    # App switching can leave Caps Lock or a Russian input source active.
-    # Preserve literal input while searching; normalize only the quit command.
+    if key=='\x03':return False
+    # The intro's skip key never leaks into a list, a menu, or the quit action.
+    if state.intro_static or state.effect and state.effect.kind=='intro' and state.effect.active():
+        if key!=curses.KEY_RESIZE:state.effect=None;state.intro_static=False
+        return True
     if not state.search and key in ('Q','й','Й'):key='q'
     enter=key in ('\n','\r',curses.KEY_ENTER)
-    copy_format={'n':'names','v':'summary'}.get(key,'report') if state.overlay=='copy' else 'report'
-    if copy_format!='report' and state.options:
-        if state.options[state.option][0]=='path':return True
-        enter=True
     down,up=key in ('j',curses.KEY_DOWN),key in ('k',curses.KEY_UP)
-    if key=='\x03':return False
     if state.search:
+        before=state.view.query
         if enter:state.search=False
         elif key=='\x1b':state.view.query,state.search=state.original_query,False
         elif key in ('\b','\x7f',curses.KEY_BACKSPACE):state.view.query=state.view.query[:-1]
         elif key=='\x15':state.view.query=''
         elif isinstance(key,str) and key.isprintable() and len(state.view.query)<512:state.view.query+=key
         state.view.selected=state.view.scroll=0
+        if state.key=='files' and before!=state.view.query:_files_changed(state)
         return True
-    if key in ('1','2','3','4','5'):
+    if state.overlay=='confirm':
+        if key=='?':_open(state,'help');return True
+        if key in ('\x1b','q','n','N'):
+            state.confirmation=None;_close(state);return True
+        if down or up:state.option=1-state.option
+        if key in ('y','Y') or enter and state.option==1:
+            row,section,identity=state.confirmation
+            state.confirmation=None;_close(state)
+            schedule('launch',lambda:actions.open_target(row,section,confirmed=identity))
+        elif enter:state.confirmation=None;_close(state)
+        return True
+    if state.confirmation is not None and (key in (curses.KEY_LEFT,curses.KEY_RIGHT) or isinstance(key,str) and key in '123456'):
+        return True
+    if key in (curses.KEY_LEFT,curses.KEY_RIGHT):
+        _switch_section(state,(state.section+(1 if key==curses.KEY_RIGHT else -1))%len(MENU),schedule);return True
+    if isinstance(key,str) and key in '123456' and len(key)==1:
         _switch_section(state,int(key)-1,schedule);return True
-    if key==',' and state.overlay!='settings':
-        if state.overlay.startswith('setting:'):_close(state)
-        else:_open(state,'settings')
-        return True
     if state.overlay:
-        if state.overlay=='help' and key in ('\t',curses.KEY_RIGHT,curses.KEY_LEFT,curses.KEY_BTAB):
-            state.help_topic=(state.help_topic+(-1 if key in (curses.KEY_LEFT,curses.KEY_BTAB) else 1))%len(HELP_TOPICS)
-            state.detail_scroll=0
-            return True
-        if state.overlay in {'help','about'} and key=='R':
-            if not state.animations_enabled:state.message=state.t('replay')+' · '+state.t('off')
-            else:state.overlay='';state.overlay_stack=[];state.animate('intro')
-            return True
         if key in ('q','\x1b'):_close(state)
         elif key=='?' and state.overlay!='help':_open(state,'help')
         elif state.overlay=='help' and key=='?':_close(state)
-        elif state.overlay in {'help','diagnostics','about','evidence','bundle'}:
+        elif state.overlay in {'help','diagnostics','evidence','bundle','commands'}:
             state.detail_scroll=max(0,state.detail_scroll+(1 if down else -1 if up else 0))
-        elif down or up:
-            size=len(settings_options(state)) if state.overlay=='settings' else len(state.options)
-            state.option=(state.option+(1 if down else -1))%max(1,size)
-        elif enter and state.overlay=='settings':
-            state.option=max(0,min(state.option,len(settings_options(state))-1))
-            preference=settings_options(state)[state.option][0]
-            choices=(True,False) if preference=='intro' else CHOICES[preference]
-            options=[(value,LANGUAGES.get(value,state.t('auto')) if preference=='language' else state.t('on' if value else 'off') if preference=='intro' else state.t(value)) for value in choices]
-            _open(state,'setting:'+preference,options)
-        elif enter and state.options:
+        elif down or up:state.option=(state.option+(1 if down else -1))%max(1,len(state.options))
+        elif (enter or state.overlay=='copy' and key in ('n','v','t')) and state.options:
             choice=state.options[state.option][0]
-            if state.overlay.startswith('setting:'):
-                setting=state.overlay.split(':')[1];updated=replace(state.preferences,**{setting:choice})
-                try:save(updated)
-                except (OSError,ValueError) as exc:state.message=state.t('save_failed');state.settings_error=str(exc)
-                else:state.preferences=updated;state.message=state.t('saved');state.settings_error=''
-            elif state.overlay=='filter':state.view.group=choice;state.view.selected=state.view.scroll=0
-            elif state.overlay=='sort':state.view.sort=choice;state.view.selected=state.view.scroll=0
+            if state.overlay=='filter':
+                if state.key=='files' and choice in {'scope','scope_default'}:
+                    if choice=='scope_default':state.files_scope=None
+                    else:
+                        raw=_read_query(screen,'Folder path: ')
+                        if raw is None or not raw.strip():return True
+                        folder=Path(raw).expanduser().absolute()
+                        state.files_scope=str(folder)
+                    state.view.selected=state.view.scroll=0;_close(state);_files_changed(state,refresh=True);return True
+                state.view.group=choice;state.view.selected=state.view.scroll=0
+                if state.key=='files':
+                    _close(state);_files_changed(state);return True
+            elif state.overlay=='sort':state.view.sort=choice
+            elif state.overlay.startswith('paths:'):
+                mode=state.overlay.split(':')[1]
+                if mode=='copy':state.copy(choice)
+                else:schedule('finder',lambda:actions.reveal(choice))
+                _close(state)
+                if state.overlay=='copy':_close(state)
+                return True
             elif state.overlay=='copy':
-                rows=state.rows();selected=state.detail or (rows[min(state.view.selected,len(rows)-1)] if rows else None)
-                if choice=='path':state.copy(str((selected or {}).get('path') or state.t('unknown')))
-                else:state.copy(copy_report(state.results[state.key],choice,current=rows,selected=selected,format=copy_format,translate=state.t))
+                if choice=='path':
+                    if not enter:return True
+                    paths=actions.paths_for(state.selected_row(),state.key)
+                    if len(paths)>1:_open(state,'paths:copy',[(path,label+' · '+path) for label,path in paths]);return True
+                    if paths:state.copy(paths[0][1])
+                else:state.copy(copy_report(state.results[state.key],choice,current=state.rows(),selected=state.selected_row(),format={'n':'names','v':'summary','t':'tsv'}.get(key,'report')))
             _close(state)
         return True
-    if key=='o' and state.key in {'apps','brew'}:
-        rows=state.rows()
-        row=state.detail or (rows[min(state.view.selected,len(rows)-1)] if rows else None)
-        if launch_target(row,state.key):
-            selected,section=dict(row),state.key
-            schedule('launch',lambda:open_app(selected,section))
-        else:state.message=state.t('app_unavailable')
-        return True
+    if key=='o':_open_target(state,schedule);return True
     if state.detail is not None:
         if key in ('q','\x1b'):
             state.detail=None;state.detail_token+=1;state.detail_scroll=0;state.animate('detail')
         elif down or up:state.detail_scroll=max(0,state.detail_scroll+(1 if down else -1))
         elif key=='y':state.copy(item_report(state.detail))
-        elif key=='x' and state.detail.get('path'):state.copy(str(state.detail['path']))
-        elif key in ('f','F') and state.detail.get('path'):
-            path=state.detail['path']
-            schedule('finder',lambda:_reveal(path))
+        elif key=='x':_path_action(state,'copy',schedule)
+        elif key in ('f','F'):_path_action(state,'reveal',schedule)
+        elif key=='m' and state.key=='security' and state.detail.get('name') in CATALOG:_open(state,'commands')
         elif key=='t':_open(state,'evidence')
         elif key=='d':_open(state,'diagnostics')
         elif key=='?':_open(state,'help')
         elif key=='c' and state.key in state.results:_open(state,'copy',_copy_options(state))
         elif (state.key=='apps' or state.detail.get('_detail_kind')=='app') and key in ('b','e','v','z','p'):
-            relative=_read_query(screen,state.t('expand_path')) if key=='e' else ''
+            relative=_read_query(screen,'Relative bundle directory: ') if key=='e' else ''
             if relative is not None:
                 path=state.detail.get('path');state.detail_token+=1
                 schedule('detail',lambda:inspect_bundle(path,tree=key in ('b','e'),subdir=relative,signing=key=='v',size=key=='z',plist=key=='p'),state.detail_token)
@@ -320,39 +366,40 @@ def _handle(state,key,schedule,screen):
                 elif key=='p':_open(state,'evidence')
         return True
     if key=='q':return False
-    if key in (curses.KEY_LEFT,curses.KEY_RIGHT):
-        _switch_section(state,(state.section+(1 if key==curses.KEY_RIGHT else -1))%len(MENU),schedule)
-    elif key=='\x1b':state.view.query='';state.view.selected=state.view.scroll=0
+    if key=='\x1b':
+        before=state.view.query;state.view.query='';state.view.selected=state.view.scroll=0
+        if state.key=='files' and before:_files_changed(state)
     elif down or up:state.view.selected=min(max(0,len(state.rows())-1),max(0,state.view.selected+(1 if down else -1)))
     elif key=='/':state.search,state.original_query=True,state.view.query
     elif key=='?':_open(state,'help')
     elif key=='d':_open(state,'diagnostics')
-    elif key=='o' and state.key=='dev':_inspect_path(state,schedule,screen)
     elif key in ('f','s','c'):
         if key!='c' or state.key in state.results:
             name={'f':'filter','s':'sort','c':'copy'}[key]
-            options=group_options(state) if key=='f' else [(x,state.t(x)) for x in ('name','version','kind','state')] if key=='s' else _copy_options(state)
-            _open(state,name,options)
-    elif key=='r' and state.key not in state.busy:schedule(state.key,COLLECTORS[state.key])
+            _open(state,name,group_options(state) if key=='f' else sort_options(state.key) if key=='s' else _copy_options(state))
+    elif key=='r':
+        if state.key=='files':_files_changed(state,refresh=True)
+        elif state.key not in state.busy:schedule(state.key,COLLECTORS[state.key])
     elif key in ('y','x') or enter:
-        rows=state.rows()
-        if rows:
-            row=rows[min(state.view.selected,len(rows)-1)]
+        row=state.selected_row()
+        if row:
             if key=='y':state.copy(item_report(row))
-            elif key=='x':
-                if row.get('path'):state.copy(str(row['path']))
+            elif key=='x':_path_action(state,'copy',schedule)
             elif row.get('action')=='diagnostics':_open(state,'diagnostics')
             elif row.get('action')=='open_bundle':_inspect_path(state,schedule,screen)
             else:
                 state.detail,state.detail_scroll=dict(row),0;state.detail_token+=1
                 if state.key=='apps':schedule('detail',lambda:inspect_bundle(row['path']),state.detail_token)
                 elif state.key=='services':schedule('detail',lambda:inspect_service(row),state.detail_token)
+                elif state.key=='files':schedule('detail',lambda:file_search.inspect_path(row['path']),state.detail_token)
                 state.animate('detail')
     return True
 
 
 def _accept_result(state,key,token,fresh):
+    if key=='files' and token!=state.files_generation:return
     state.busy.discard(key)
+    state.invalidate()
     if key=='launch':
         state.message=state.t('app_opened' if fresh.status=='ok' else 'app_unavailable' if fresh.status=='unavailable' else 'app_open_failed')
         state.last_error='; '.join(fresh.errors)
@@ -369,13 +416,18 @@ def _accept_result(state,key,token,fresh):
             if state.key=='apps' and 'apps' in state.results:
                 for row in state.results['apps'].data:
                     if row.get('path')==state.detail.get('path'):
-                        row.update({k:state.detail[k] for k in ('attribution','signing','source','verification_state') if k in state.detail})
-    elif fresh.status in {'error','unavailable'} and key in state.results and state.results[key].status in {'ok','partial'}:
+                        row.update({k:state.detail[k] for k in ('attribution','signing','source','verification_state','_actions') if k in state.detail})
+    elif key!='files' and fresh.status in {'error','unavailable'} and key in state.results and state.results[key].status in {'ok','partial'}:
         state.message=state.t('refresh_failed');state.last_error='; '.join(fresh.errors or fresh.limitations)
     else:
         old=state.rows()[min(state.view.selected,len(state.rows())-1)] if key==state.key and state.rows() else None
         state.results[key]=fresh
-        if old:
+        if key=='files' and state.files_selection is not None:
+            path,index=state.files_selection;view=state.views['files']
+            rows=select(fresh,group=view.group,sort=view.sort)
+            view.selected=next((i for i,row in enumerate(rows) if row.get('path')==path),min(index,max(0,len(rows)-1)))
+            view.scroll=min(view.scroll,max(0,len(rows)-1));state.files_selection=None
+        elif old:
             identity=old.get('path') or old.get('name') or old.get('label')
             for i,row in enumerate(state.rows()):
                 if (row.get('path') or row.get('name') or row.get('label'))==identity:state.view.selected=i;break
@@ -383,18 +435,15 @@ def _accept_result(state,key,token,fresh):
 
 def run():
     def app(screen):
-        prior_cursor=None
+        prior_cursor=None;stopping=threading.Event();jobs=file_search.SearchJobs(prepare=actions.prepare_result)
         try:
             try:prior_cursor=curses.curs_set(0)
             except curses.error:pass
             try:curses.set_escdelay(25)
             except (AttributeError,curses.error):pass
             screen.keypad(True);screen.timeout(50)
-            preferences,problem=load();state=State(preferences=preferences,settings_error=problem)
-            if problem:state.message=state.t('settings_damaged')
-            state.section=0
-            _init_colors()
-            incoming,pending_jobs=queue.Queue(),{}
+            state=State();_init_colors()
+            incoming,pending_jobs=queue.Queue(maxsize=16),{}
             def schedule(key,operation,token=0):
                 if key in state.busy:
                     if key=='detail':pending_jobs[key]=(operation,token)
@@ -402,15 +451,25 @@ def run():
                 state.busy.add(key)
                 def worker():
                     started=time.monotonic()
-                    try:result=operation()
-                    except Exception as exc:result=Result(key,'error',{},errors=[str(exc)],source='Collector worker')
-                    result.duration_ms=round((time.monotonic()-started)*1000,2)
-                    incoming.put((key,token,result))
+                    try:
+                        fresh=operation()
+                        if key in COLLECTORS or key=='detail':fresh=actions.prepare_result(fresh)
+                    except Exception as exc:fresh=Result(key,'error',{},errors=[str(exc)],source='Inspection worker')
+                    fresh.duration_ms=round((time.monotonic()-started)*1000,2)
+                    if not stopping.is_set():incoming.put((key,token,fresh))
                 threading.Thread(target=worker,daemon=True,name='peek-'+key).start()
             schedule(state.key,COLLECTORS[state.key])
-            if preferences.intro:state.animate('intro')
-            dirty=True
+            if state.animations_enabled:state.animate('intro')
+            else:state.intro_static=True
+            dirty=True;last_draw=0.;files_generation=state.files_generation
             while True:
+                if files_generation!=state.files_generation:
+                    files_generation=state.files_generation
+                    jobs.request(files_generation,state.views['files'].query,state.files_scope,refresh=state.files_refresh,group=state.views['files'].group,selected_path=state.files_selection[0] if state.files_selection else None)
+                    state.files_refresh=False
+                for token,fresh in jobs.poll():
+                    if token==state.files_generation:
+                        _accept_result(state,'files',token,fresh);dirty=True
                 while True:
                     try:key,token,fresh=incoming.get_nowait()
                     except queue.Empty:break
@@ -420,15 +479,17 @@ def run():
                         if next_token==state.detail_token and state.detail is not None:schedule(key,operation,next_token)
                     dirty=True
                 animated=state.effect is not None and state.effect.active()
-                if dirty or animated or state.busy and state.animations_enabled:_draw(screen,state);dirty=False
+                now=state.clock()
+                if dirty or animated or state.busy and state.animations_enabled and now-last_draw>=.12:
+                    _draw(screen,state);dirty=False;last_draw=now
                 if state.effect is not None and not state.effect.active():state.effect=None;dirty=True
                 try:key=screen.get_wch()
                 except curses.error:continue
-                if state.effect and state.effect.kind=='intro':state.effect=None
                 state.message=''
                 if not _handle(state,key,schedule,screen):break
                 dirty=True
         finally:
+            stopping.set();jobs.close()
             if prior_cursor is not None:
                 try:curses.curs_set(prior_cursor)
                 except curses.error:pass

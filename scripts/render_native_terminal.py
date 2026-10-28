@@ -18,7 +18,7 @@ def color(index):
   gray=8+(index-232)*10;return '#'+f'{gray:02x}'*3
  index-=16;levels=[0,95,135,175,215,255];return '#'+''.join(f'{levels[x]:02x}' for x in [index//36,index//6%6,index%6])
 for name,frame in frames.items():
- if name.removesuffix('-pt_BR') not in {'intro','apps','detail-apps','brew','detail-brew','settings','help-0','help-2','dev','resized-apps'}:continue
+ if name.removesuffix('-pt_BR') not in {'intro','apps','detail-apps','brew','detail-brew','files','help','dev','resized-apps'}:continue
  image=Image.new('RGB',(frame['width']*10+24,frame['height']*22+24),background);draw=ImageDraw.Draw(image)
  for y,line in enumerate(frame['native_rows']):
   x=0

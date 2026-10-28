@@ -6,7 +6,7 @@ import plistlib
 import tempfile
 import unittest
 from unittest.mock import patch
-from peekcli import settings,tui,i18n
+from peekcli import tui
 from peekcli.collectors import apps
 from peekcli.screens import build_frame,footer
 from peekcli.text import cell_width
@@ -15,28 +15,17 @@ from peekcli.text import cell_width
 class FinalNavigationTests(unittest.TestCase):
     def test_escape_returns_one_level_and_restores_detail_scroll(self):
         s=tui.State();s.detail={'name':'Example'};s.detail_scroll=7
-        tui._open(s,'settings');s.option=0
-        tui._handle(s,'\n',lambda *a:None,None)
-        self.assertEqual(s.overlay,'setting:language')
-        tui._handle(s,'\x1b',lambda *a:None,None)
-        self.assertEqual((s.overlay,s.option),('settings',0))
-        tui._handle(s,'\x1b',lambda *a:None,None)
-        self.assertEqual(s.overlay,'');self.assertEqual(s.detail_scroll,7)
+        tui._open(s,'copy',[('selected','Selected Item')]);tui._open(s,'help')
+        tui._handle(s,'\x1b',lambda *a:None,None);self.assertEqual(s.overlay,'copy')
+        tui._handle(s,'\x1b',lambda *a:None,None);self.assertEqual(s.overlay,'');self.assertEqual(s.detail_scroll,7)
         tui._handle(s,'\x1b',lambda *a:None,None);self.assertIsNone(s.detail)
         self.assertFalse(tui._handle(s,'q',lambda *a:None,None))
 
-    def test_setting_shortcut_does_not_stack_duplicate_settings(self):
-        s=tui.State();noop=lambda *a:None
-        for key in [',','\n',',']:tui._handle(s,key,noop,None)
-        self.assertEqual(s.overlay,'settings')
-        tui._handle(s,'\x1b',noop,None)
-        self.assertEqual(s.overlay,'');self.assertFalse(s.overlay_stack)
-        self.assertFalse(tui._handle(s,'q',noop,None))
 
     def test_sections_switch_directly_from_every_non_input_view(self):
-        for overlay in ['','settings','setting:language','help','filter','sort','copy','evidence','bundle','diagnostics','about']:
-            for key in '12345':
-                s=tui.State();s.detail={'name':'Example'};s.detail_token=4;tui._open(s,'settings');tui._open(s,overlay)
+        for overlay in ['','help','filter','sort','copy','evidence','bundle','diagnostics']:
+            for key in '123456':
+                s=tui.State();s.detail={'name':'Example'};s.detail_token=4;tui._open(s,'copy');tui._open(s,overlay)
                 jobs=[];self.assertTrue(tui._handle(s,key,lambda *a:jobs.append(a),None))
                 self.assertEqual(s.section,int(key)-1);self.assertEqual(s.overlay,'');self.assertFalse(s.overlay_stack);self.assertIsNone(s.detail);self.assertGreater(s.detail_token,4)
                 self.assertFalse(tui._handle(s,'q',lambda *a:None,None))
@@ -56,34 +45,8 @@ class FinalNavigationTests(unittest.TestCase):
             def get_wch(self):return next(self.keys)
         self.assertEqual(tui._read_query(Input()),'15q')
 
-    def test_removed_preferences_and_languages_migrate_safely(self):
-        self.assertEqual(set(i18n.LANGUAGES),{'en','pl','de','fr','es','pt_BR','ru'})
-        self.assertNotIn('density',asdict(settings.Preferences()));self.assertNotIn('density',settings.CHOICES)
-        with tempfile.TemporaryDirectory() as temp,patch.dict(os.environ,{'PEEK_CONFIG':temp+'/settings.json'}):
-            p=Path(temp)/'settings.json'
-            for language in ['it','ja']:
-                original=json.dumps({'language':language,'density':'compact','motion':'off','intro':False});p.write_text(original)
-                prefs,error=settings.load();self.assertFalse(error);self.assertEqual(prefs.language,'auto');self.assertFalse(hasattr(prefs,'motion'));self.assertFalse(prefs.intro);self.assertEqual(p.read_text(),original)
-                self.assertEqual(i18n.catalog(language),i18n.catalog('en'))
-                settings.save(prefs);self.assertNotIn('density',json.loads(p.read_text()));self.assertNotIn('motion',json.loads(p.read_text()))
 
-    def test_russian_is_available_detected_and_persisted(self):
-        self.assertEqual(i18n.LANGUAGES['ru'],'Русский')
-        self.assertIn('ru',settings.CHOICES['language'])
-        with patch.dict(os.environ,{'LC_ALL':'ru_RU.UTF-8'},clear=True):self.assertEqual(i18n.resolve(),'ru')
-        with tempfile.TemporaryDirectory() as temp,patch.dict(os.environ,{'PEEK_CONFIG':temp+'/settings.json'}):
-            settings.save(settings.Preferences(language='ru'))
-            prefs,error=settings.load();self.assertFalse(error);self.assertEqual(prefs.language,'ru')
-            self.assertEqual(i18n.tr('settings',prefs.language),'Настройки')
 
-    def test_final_localized_views_and_hints_fit(self):
-        for lang in i18n.LANGUAGES:
-            for width,height in [(60,15),(80,18),(100,28),(160,40)]:
-                s=tui.State(preferences=settings.Preferences(language=lang))
-                for overlay in ['settings','setting:language','help','bundle','evidence','diagnostics']:
-                    s.overlay=overlay;s.options=[('en','English')]
-                    for span in build_frame(s,width,height).spans:self.assertLess(span.x+cell_width(span.text),width)
-                    self.assertLessEqual(cell_width(footer(s,width-4)),width-4)
 
 
 class TraversalCleanupTests(unittest.TestCase):

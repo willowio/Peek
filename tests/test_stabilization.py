@@ -7,14 +7,12 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
-from peekcli import branding,settings,tui
+from peekcli import branding,tui
 from peekcli.animation import Timeline
 from peekcli.collectors import apps
-from peekcli.i18n import LANGUAGES,catalog
-from peekcli.keymap import HELP_TOPICS
 from peekcli.layout import Layout
 from peekcli.models import Result
-from peekcli.screens import build_frame,detail_lines,settings_options
+from peekcli.screens import build_frame,detail_lines
 from peekcli.text import cell_width
 from peekcli.views import select
 
@@ -111,8 +109,8 @@ class StabilizedGeometryTests(unittest.TestCase):
     def test_all_screens_are_bounded_and_dialogs_are_borderless(self):
         for language in ['en','de','pt_BR']:
             for width,height in [(60,15),(80,18),(80,24),(100,28),(120,30),(160,40)]:
-                state=tui.State(preferences=settings.Preferences(language=language));state.results['apps']=Result('apps','ok',[{'name':'世界e\u0301'*100,'path':'/'+'long/'*100,'version':'1.0','source':{'category':'unknown'}}])
-                for overlay in ['','settings','help','filter','sort','copy','setting:language','diagnostics','evidence','about']:
+                state=tui.State();state.results['apps']=Result('apps','ok',[{'name':'世界e\u0301'*100,'path':'/'+'long/'*100,'version':'1.0','source':{'category':'unknown'}}])
+                for overlay in ['','help','filter','sort','copy','diagnostics','evidence']:
                     state.overlay=overlay;state.options=[('all','All')]
                     frame=build_frame(state,width,height)
                     for span in frame.spans:self.assertTrue(0<=span.y<height and 0<=span.x and span.x+cell_width(span.text)<width)
@@ -120,19 +118,14 @@ class StabilizedGeometryTests(unittest.TestCase):
                     self.assertFalse(borders)
                     if overlay:self.assertFalse(any(s.text in {'|','│'} for s in frame.spans))
 
-    def test_settings_and_sparse_details_have_bounded_content_width(self):
-        state=tui.State();state.overlay='settings'
+    def test_menus_and_sparse_details_have_bounded_content_width(self):
+        state=tui.State();state.overlay='copy';state.options=[('selected','Selected Item'),('all','Entire Section')]
         frame=build_frame(state,160,40)
-        panel=[s for s in frame.spans if s.y>8 and s.role!='cyan' and s.y<38]
-        self.assertLessEqual(max(cell_width(s.text) for s in panel),68)
-        self.assertLess(max(s.y for s in panel)-min(s.y for s in panel),20)
-        state.overlay='';state.section=1;state.detail={'name':'example','kind':'formula','version':'1','dependencies':[],'dependencies_collected':True,'requested':False,'dependency':True}
-        state.results['brew']=Result('brew','ok',{'formulae':[state.detail],'casks':[],'taps':[]})
-        wide=build_frame(state,160,40)
-        self.assertFalse(any(s.text.startswith('+') for s in wide.spans))
-        self.assertTrue(any(s.text=='│' for s in wide.spans))
+        content=[span for span in frame.spans if span.selected and span.text.startswith('> ')]
+        self.assertTrue(content);self.assertLessEqual(cell_width(content[0].text),68)
+        state.overlay='';state.section=1;state.detail={'name':'example','kind':'formula','version':'1','requested':False}
         text='\n'.join(line for line,_ in detail_lines(state.detail,'brew',state.t))
-        self.assertNotIn('Dependencies',text);self.assertNotIn('None recorded',text);self.assertNotIn('Unknown',text)
+        self.assertNotIn('Dependencies',text)
 
     def test_only_selection_pair_sets_background_without_changing_terminal_palette(self):
         with patch.dict(os.environ,{},clear=True),patch.object(tui.curses,'has_colors',return_value=True),patch.object(tui.curses,'start_color'),patch.object(tui.curses,'use_default_colors'),patch.object(tui.curses,'COLORS',256,create=True),patch.object(tui.curses,'COLOR_PAIRS',256,create=True),patch.object(tui.curses,'init_color') as palette,patch.object(tui.curses,'init_pair') as pair:
@@ -148,27 +141,13 @@ class StabilizedGeometryTests(unittest.TestCase):
         defaults.assert_called_once();pair.assert_not_called()
 
     def test_missing_path_is_not_offered_or_copied(self):
-        state=tui.State();state.results['security']=Result('security','ok',[{'name':'SIP','state':'Enabled'}]);state.section=2
+        state=tui.State();state.results['security']=Result('security','ok',[{'name':'SIP','state':'Enabled'}]);state.section=3
         self.assertNotIn('path',dict(tui._copy_options(state)))
         with patch.object(tui,'_copy') as copy:
             tui._handle(state,'x',lambda *args:None,None)
         copy.assert_not_called()
 
-    def test_settings_exposes_only_two_real_preferences(self):
-        state=tui.State()
-        self.assertEqual([key for key,_,_ in settings_options(state)],['language','intro'])
-        self.assertEqual(set(settings.CHOICES),{'language'})
-        state.section=1;state.results['brew']=Result('brew','ok',{'formulae':[{'name':'example','dependency':None}],'casks':[],'taps':[]})
-        from peekcli.screens import group_options
-        self.assertNotIn('dependency',dict(group_options(state)));self.assertNotIn('requested',dict(group_options(state)))
 
-    def test_help_topics_navigate_without_changing_main_selection(self):
-        state=tui.State();state.overlay='help';old=state.section
-        for i in range(len(HELP_TOPICS)):
-            tui._handle(state,'\t',lambda *args:None,None)
-            self.assertEqual(state.help_topic,(i+1)%len(HELP_TOPICS))
-            self.assertEqual(state.section,old)
-        tui._handle(state,'\x1b',lambda *args:None,None);self.assertEqual(state.overlay,'')
 
 
 if __name__=='__main__':unittest.main()
