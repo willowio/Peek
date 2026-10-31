@@ -285,7 +285,7 @@ def _header(frame,state,layout):
     if layout.header.width>=cell_width(art[0])+cell_width(metadata)+4:
         put_region(frame,layout.header,0,layout.header.width-cell_width(metadata),metadata,'muted')
         if layout.header.height>1:
-            credit=f'Peek {__version__} · by willow'
+            credit=f'Peek {__version__} · by feowur'
             put_region(frame,layout.header,1,layout.header.width-cell_width(credit),credit,'muted')
     labels=[t(key) for _,key in state.menu]
     if sum(cell_width(label)+7 for label in labels)>layout.navigation.width:

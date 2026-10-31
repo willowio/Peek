@@ -44,7 +44,7 @@ Requires macOS and Python 3.11 or newer.
   trap 'rm -rf "$tmp"' EXIT
 
   curl -fsSL \
-    https://github.com/willowio/Peek/releases/download/v0.2.0/peek-0.2.0-bootstrap.py \
+    https://github.com/feowur/Peek/releases/download/v0.2.0/peek-0.2.0-bootstrap.py \
     -o "$tmp/peek-bootstrap.py"
 
   printf '%s  %s\n' \
@@ -52,7 +52,7 @@ Requires macOS and Python 3.11 or newer.
     "$tmp/peek-bootstrap.py" | shasum -a 256 -c -
 
   python3 "$tmp/peek-bootstrap.py" \
-    --url https://github.com/willowio/Peek/releases/download/v0.2.0/peek-0.2.0-install.zip \
+    --url https://github.com/feowur/Peek/releases/download/v0.2.0/peek-0.2.0-install.zip \
     --sha256 2bc7bbd5f65cf6245045cb61a2d4ba75785f17e8845b2a910ccb4e212db805e4
 )
 ```
@@ -122,4 +122,4 @@ For further information about commands, search limits, security boundaries, and 
 
 ---
 
-made by willow.
+made by feowur.
