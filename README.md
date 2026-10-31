@@ -35,7 +35,7 @@ File search is deliberately bounded, so it doesn't pretend to inventory your ent
 
 Requires macOS and Python 3.11 or newer.
 
-**Current published release: v0.2.0**
+**Current published release: v0.2.1**
 
 ```sh
 (
@@ -44,7 +44,7 @@ Requires macOS and Python 3.11 or newer.
   trap 'rm -rf "$tmp"' EXIT
 
   curl -fsSL \
-    https://github.com/feowur/Peek/releases/download/v0.2.0/peek-0.2.0-bootstrap.py \
+    https://github.com/feowur/Peek/releases/download/v0.2.1/peek-0.2.1-bootstrap.py \
     -o "$tmp/peek-bootstrap.py"
 
   printf '%s  %s\n' \
@@ -52,8 +52,8 @@ Requires macOS and Python 3.11 or newer.
     "$tmp/peek-bootstrap.py" | shasum -a 256 -c -
 
   python3 "$tmp/peek-bootstrap.py" \
-    --url https://github.com/feowur/Peek/releases/download/v0.2.0/peek-0.2.0-install.zip \
-    --sha256 2bc7bbd5f65cf6245045cb61a2d4ba75785f17e8845b2a910ccb4e212db805e4
+    --url https://github.com/feowur/Peek/releases/download/v0.2.1/peek-0.2.1-install.zip \
+    --sha256 8847184892d9c31ca385ec21207e98dfb4106371d3cc9b774bd9bb3ab4708d91
 )
 ```
 
@@ -79,16 +79,16 @@ It does not remove your personal files or change your shell configuration.
 
 ## run from source
 
-Peek v0.2.0 is now available on GitHub. You can also run it directly from a source checkout.
+Peek v0.2.1 is now available on GitHub. You can also run it directly from a source checkout.
 
-To run v0.2.0 directly from a source checkout:
+To run v0.2.1 directly from a source checkout:
 
 ```sh
 cd ~/Projects/Peekcli
 PYTHONPATH=src .venv/bin/python -m peekcli
 ```
 
-Peek v0.2.0 includes six sections, native filename search without Spotlight, a compact one-screen Help reference, and display-only management instructions for the six Security controls.
+Peek v0.2.1 includes six sections, native filename search without Spotlight, a compact one-screen Help reference, and display-only management instructions for the six Security controls.
 
 Files supports inspection, Finder reveal, and copying, but never launches selected files.
 
@@ -105,14 +105,14 @@ python3 scripts/build_bundle.py
 Local candidate artifacts and checksums are written to:
 
 ```text
-dist/0.2.0/
+dist/0.2.1/
 ```
 
 To install a reviewed wheel, provide its independently verified SHA-256 checksum:
 
 ```sh
 python3 scripts/install.py \
-  --wheel dist/0.2.0/peekcli-0.2.0-py3-none-any.whl \
+  --wheel dist/0.2.1/peekcli-0.2.1-py3-none-any.whl \
   --sha256 TRUSTED_WHEEL_SHA256
 ```
 
